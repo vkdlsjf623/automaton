@@ -525,6 +525,112 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       },
     },
 
+    // ── Superteam Earn (bounty/project/hackathon submissions) ──
+    // Agent-native API: self-registration, no human account needed.
+    // Payout claiming is structurally gated on the creator's own action
+    // (requires their Privy token), so submissions are real but nothing
+    // pays out without explicit human involvement.
+    {
+      name: "register_superteam_agent",
+      description:
+        "Register (or fetch existing registration) as an agent on Superteam Earn, a bounty/project/hackathon marketplace. Returns a claim code the creator must use to link payouts to their own wallet — share it with them.",
+      category: "trading",
+      riskLevel: "caution",
+      parameters: { type: "object", properties: {} },
+      execute: async (_args, ctx) => {
+        const { registerAgent } = await import("../trading/superteam-earn.js");
+        try {
+          const creds = await registerAgent(ctx.db, ctx.config.name);
+          return `Registered on Superteam Earn as "${creds.username}". Claim code (give this to your creator to link payouts): ${creds.claimCode} — they complete it at https://superteam.fun/earn/claim/${creds.claimCode}`;
+        } catch (err: any) {
+          return `Registration failed: ${err?.message || err}`;
+        }
+      },
+    },
+    {
+      name: "list_bounty_listings",
+      description: "List agent-eligible bounty/project/hackathon listings on Superteam Earn. Call register_superteam_agent first if not yet registered.",
+      category: "trading",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["bounty", "project", "hackathon"] },
+          take: { type: "number", description: "Max results (default 20)" },
+        },
+      },
+      execute: async (args, ctx) => {
+        const { getStoredCredentials, getLiveListings } = await import("../trading/superteam-earn.js");
+        const creds = getStoredCredentials(ctx.db);
+        if (!creds) return "Not registered yet. Call register_superteam_agent first.";
+        const listings = await getLiveListings(creds.apiKey, {
+          type: args.type as any,
+          take: (args.take as number) || 20,
+        });
+        return JSON.stringify(listings);
+      },
+    },
+    {
+      name: "get_bounty_details",
+      description: "Fetch full details (eligibility questions, compensation, requirements) for a Superteam Earn listing by its slug.",
+      category: "trading",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: { slug: { type: "string" } },
+        required: ["slug"],
+      },
+      execute: async (args, ctx) => {
+        const { getStoredCredentials, getListingDetails } = await import("../trading/superteam-earn.js");
+        const creds = getStoredCredentials(ctx.db);
+        if (!creds) return "Not registered yet. Call register_superteam_agent first.";
+        const details = await getListingDetails(creds.apiKey, args.slug as string);
+        return JSON.stringify(details);
+      },
+    },
+    {
+      name: "submit_bounty_work",
+      description:
+        "Submit completed work to a Superteam Earn bounty/project/hackathon listing. This is a real, public submission — not a simulation. For project-type listings, telegram is required so the creator can be reached about payout.",
+      category: "trading",
+      riskLevel: "caution",
+      parameters: {
+        type: "object",
+        properties: {
+          listing_id: { type: "string" },
+          link: { type: "string", description: "URL to the submitted work" },
+          other_info: { type: "string", description: "Description of what was built and how it works" },
+          telegram: { type: "string", description: "Creator's Telegram URL, e.g. http://t.me/username — required for project-type listings" },
+          eligibility_answers: {
+            type: "array",
+            description: "Answers to the listing's eligibility questions, if any",
+            items: {
+              type: "object",
+              properties: { question: { type: "string" }, answer: { type: "string" } },
+            },
+          },
+        },
+        required: ["listing_id", "link"],
+      },
+      execute: async (args, ctx) => {
+        const { getStoredCredentials, submitWork } = await import("../trading/superteam-earn.js");
+        const creds = getStoredCredentials(ctx.db);
+        if (!creds) return "Not registered yet. Call register_superteam_agent first.";
+        try {
+          const result = await submitWork(creds.apiKey, {
+            listingId: args.listing_id as string,
+            link: args.link as string,
+            otherInfo: args.other_info as string | undefined,
+            telegram: args.telegram as string | undefined,
+            eligibilityAnswers: args.eligibility_answers as { question: string; answer: string }[] | undefined,
+          });
+          return `Submitted. ${JSON.stringify(result)}`;
+        } catch (err: any) {
+          return `Submission failed: ${err?.message || err}`;
+        }
+      },
+    },
+
     {
       name: "create_sandbox",
       description:
