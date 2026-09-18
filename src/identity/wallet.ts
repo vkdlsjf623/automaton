@@ -17,6 +17,7 @@ import type { WalletData } from "../types.js";
 import type { ChainType } from "./chain.js";
 import { EvmChainIdentity, SolanaChainIdentity } from "./chain.js";
 import type { ChainIdentity } from "./chain.js";
+import { getHomeDir } from "../paths.js";
 
 /**
  * Create a stub PrivateKeyAccount for Solana wallets.
@@ -42,7 +43,7 @@ function createSolanaStubAccount(solanaAddress: string): PrivateKeyAccount {
 }
 
 const AUTOMATON_DIR = path.join(
-  process.env.HOME || "/root",
+  getHomeDir(),
   ".automaton",
 );
 const WALLET_FILE = path.join(AUTOMATON_DIR, "wallet.json");

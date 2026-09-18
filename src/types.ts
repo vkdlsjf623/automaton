@@ -75,6 +75,10 @@ export interface AutomatonConfig {
   rpcUrl?: string;
   /** Chain type for this automaton. Defaults to "evm" if absent. */
   chainType?: ChainType;
+  /** Notional starting balance (원) for the KRW stock paper-trading ledger. Independent of any real brokerage cash balance. */
+  paperTradingStartingBalanceKrw?: number;
+  /** Price per call (USD) for the automaton's x402-sold inference service. */
+  x402PricePerCallUsdc?: number;
 }
 
 export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
@@ -90,6 +94,8 @@ export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
   maxTurnsPerCycle: 25,
   childSandboxMemoryMb: 1024,
   socialRelayUrl: "https://social.conway.tech",
+  paperTradingStartingBalanceKrw: 1_000_000,
+  x402PricePerCallUsdc: 0.02,
 };
 
 // ─── Agent State ─────────────────────────────────────────────────
@@ -161,7 +167,8 @@ export type ToolCategory =
   | "git"
   | "registry"
   | "replication"
-  | "memory";
+  | "memory"
+  | "trading";
 
 export interface ToolContext {
   identity: AutomatonIdentity;

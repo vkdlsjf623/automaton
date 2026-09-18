@@ -11,6 +11,7 @@ import crypto from "crypto";
 import type BetterSqlite3 from "better-sqlite3";
 import type { SoulModel } from "../types.js";
 import { createLogger } from "../observability/logger.js";
+import { getHomeDir } from "../paths.js";
 const logger = createLogger("soul");
 
 // ─── Constants ──────────────────────────────────────────────────
@@ -337,7 +338,7 @@ export function loadCurrentSoul(
   soulPath?: string,
 ): SoulModel | null {
   try {
-    const home = process.env.HOME || "/root";
+    const home = getHomeDir();
     const resolvedPath = soulPath || path.join(home, ".automaton", "SOUL.md");
     if (!fs.existsSync(resolvedPath)) return null;
     const content = fs.readFileSync(resolvedPath, "utf-8");

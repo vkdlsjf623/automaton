@@ -565,6 +565,21 @@ export const MIGRATION_V7 = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_onchain_status ON onchain_transactions(status);
+
+  -- KRW stock paper-trading ledger (kiwoomcli quotes, simulated fills only)
+  CREATE TABLE IF NOT EXISTS paper_trades (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    side TEXT NOT NULL CHECK(side IN ('buy','sell')),
+    qty INTEGER NOT NULL,
+    price_krw INTEGER NOT NULL,
+    cost_krw INTEGER NOT NULL,
+    realized_pnl_krw INTEGER,
+    cash_after_krw INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_paper_trades_code ON paper_trades(code);
 `;
 
 // === Phase 4.1: Observability ===

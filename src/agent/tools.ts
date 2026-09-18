@@ -108,6 +108,15 @@ function isForbiddenCommand(command: string, sandboxId: string): string | null {
 
 // ─── Built-in Tools ────────────────────────────────────────────
 
+// Module-level: the x402 service is a long-lived HTTP server + tunnel,
+// not a per-call operation, so it can't live inside a single tool's
+// execute() closure. Lost on process restart — acceptable for V1.
+let x402ServiceHandle: {
+  server: import("http").Server;
+  tunnelStop: () => void;
+  url: string;
+} | null = null;
+
 export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
   return [
     // ── VM/Sandbox Tools ──
@@ -336,6 +345,186 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         return `Credit topup successful: +$${amountUsd} (${amountUsd * 100} cents) credits purchased via x402. Check your new balance with check_credits.`;
       },
     },
+
+    // ── KRW Stock Paper-Trading (kiwoomcli, 종합계좌) ──
+    // Real quotes/balance, simulated orders only. No code here ever calls
+    // kiwoomcli's order-submission subcommands (buy/sell/...).
+    {
+      name: "stock_quote",
+      description: "Get the real current price for a 6-digit Korean stock code (e.g. 005930 for Samsung Electronics).",
+      category: "trading",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          code: { type: "string", description: "6-digit KR stock code" },
+        },
+        required: ["code"],
+      },
+      execute: async (args) => {
+        const { getStockQuote } = await import("../trading/kiwoom-cli.js");
+        const quote = await getStockQuote(args.code as string);
+        return JSON.stringify(quote);
+      },
+    },
+    {
+      name: "stock_cash_balance",
+      description:
+        "Check the real KRW cash balance (예수금) in the 종합계좌 brokerage account. Informational only — does NOT affect or seed the paper-trading balance, which is a separate notional practice fund.",
+      category: "trading",
+      riskLevel: "safe",
+      parameters: { type: "object", properties: {} },
+      execute: async () => {
+        const { getCashBalance } = await import("../trading/kiwoom-cli.js");
+        const balance = await getCashBalance();
+        return JSON.stringify(balance);
+      },
+    },
+    {
+      name: "stock_paper_order",
+      description:
+        "Simulate a stock buy or sell against your paper-trading balance (a notional practice fund, not real money). Uses the real current price if price_krw is omitted. Never places a real order.",
+      category: "trading",
+      riskLevel: "caution",
+      parameters: {
+        type: "object",
+        properties: {
+          code: { type: "string", description: "6-digit KR stock code" },
+          side: { type: "string", enum: ["buy", "sell"] },
+          qty: { type: "number", description: "Number of shares" },
+          price_krw: {
+            type: "number",
+            description: "Simulated fill price in KRW. If omitted, the real current quote is used.",
+          },
+        },
+        required: ["code", "side", "qty"],
+      },
+      execute: async (args, ctx) => {
+        const { getStockQuote } = await import("../trading/kiwoom-cli.js");
+        const { simulateBuy, simulateSell, getPaperCash } = await import("../trading/paper-engine.js");
+        const code = args.code as string;
+        const side = args.side as "buy" | "sell";
+        const qty = args.qty as number;
+        const startingBalance = ctx.config.paperTradingStartingBalanceKrw;
+
+        let priceKrw = args.price_krw as number | undefined;
+        if (!priceKrw) {
+          const quote = await getStockQuote(code);
+          priceKrw = Number(quote?.cur_prc ?? quote?.price ?? quote?.stck_prpr);
+          if (!priceKrw || !Number.isFinite(priceKrw)) {
+            return `Could not determine a price for ${code} from the live quote. Pass price_krw explicitly.`;
+          }
+          priceKrw = Math.abs(priceKrw);
+        }
+
+        const result =
+          side === "buy"
+            ? simulateBuy(ctx.db, { code, qty, priceKrw }, startingBalance)
+            : simulateSell(ctx.db, { code, qty, priceKrw }, startingBalance);
+
+        if (!result.ok) {
+          return `Paper order rejected: ${result.error}`;
+        }
+
+        const pnlNote =
+          result.trade!.realizedPnlKrw !== undefined
+            ? ` (realized P&L: ₩${result.trade!.realizedPnlKrw.toLocaleString()})`
+            : "";
+        return `Paper ${side} filled: ${qty} shares of ${code} @ ₩${priceKrw.toLocaleString()}${pnlNote}. Paper cash balance: ₩${result.cashAfterKrw.toLocaleString()}. (starting balance: ₩${(startingBalance ?? getPaperCash(ctx.db)).toLocaleString()})`;
+      },
+    },
+
+    // ── x402 Service Selling (real USDC, no marketplace signup needed) ──
+    {
+      name: "start_x402_service",
+      description:
+        "Start selling your inference capability as a paid HTTP endpoint over the x402 protocol, billed in real USDC on Base. Exposes it publicly via a Cloudflare Quick Tunnel. Requires an EVM wallet with a small ETH balance on Base for settlement gas.",
+      category: "trading",
+      riskLevel: "caution",
+      parameters: { type: "object", properties: {} },
+      execute: async (_args, ctx) => {
+        const chainType = ctx.config.chainType || ctx.identity.chainType || "evm";
+        if (chainType === "solana") {
+          return "x402 service selling requires an EVM wallet (settlement uses EIP-3009 signatures).";
+        }
+        if (x402ServiceHandle) {
+          return `x402 service already running at ${x402ServiceHandle.url}`;
+        }
+
+        const { createX402Server } = await import("../trading/x402-server.js");
+        const { startQuickTunnel } = await import("../trading/cloudflare-tunnel.js");
+
+        const port = 8402;
+        const route = "/v1/ask";
+        const priceUsdc = ctx.config.x402PricePerCallUsdc ?? 0.02;
+        const server = createX402Server({
+          port,
+          route,
+          priceUsdc,
+          payToAddress: ctx.identity.address as `0x${string}`,
+          account: ctx.identity.account,
+          db: ctx.db,
+          inference: ctx.inference,
+          rpcUrl: ctx.config.rpcUrl,
+        });
+
+        await new Promise<void>((resolve) => server.listen(port, resolve));
+
+        let tunnel;
+        try {
+          tunnel = await startQuickTunnel(port);
+        } catch (err: any) {
+          server.close();
+          return `Started local server but failed to expose it publicly: ${err?.message || err}`;
+        }
+
+        x402ServiceHandle = { server, tunnelStop: tunnel.stop, url: `${tunnel.url}${route}` };
+        return `x402 service live at ${x402ServiceHandle.url} — $${priceUsdc}/call in USDC on Base. Not yet listed on any marketplace; check_x402_earnings tracks incoming payments.`;
+      },
+    },
+    {
+      name: "stop_x402_service",
+      description: "Stop the running x402 service and its public tunnel.",
+      category: "trading",
+      riskLevel: "safe",
+      parameters: { type: "object", properties: {} },
+      execute: async () => {
+        if (!x402ServiceHandle) {
+          return "No x402 service is currently running.";
+        }
+        x402ServiceHandle.tunnelStop();
+        x402ServiceHandle.server.close();
+        const url = x402ServiceHandle.url;
+        x402ServiceHandle = null;
+        return `Stopped x402 service (was at ${url}).`;
+      },
+    },
+    {
+      name: "check_x402_earnings",
+      description: "Check total earnings received via the x402 service.",
+      category: "trading",
+      riskLevel: "safe",
+      parameters: { type: "object", properties: {} },
+      execute: async (_args, ctx) => {
+        const rows = ctx.db.raw
+          .prepare(
+            `SELECT tx_hash, metadata FROM onchain_transactions WHERE operation = 'x402_receive'`,
+          )
+          .all() as { tx_hash: string; metadata: string }[];
+        if (rows.length === 0) {
+          return "No x402 earnings yet.";
+        }
+        const totalUsdc = rows.reduce((sum, r) => {
+          try {
+            return sum + (JSON.parse(r.metadata)?.priceUsdc ?? 0);
+          } catch {
+            return sum;
+          }
+        }, 0);
+        return `x402 earnings: ${rows.length} paid call(s), $${totalUsdc.toFixed(2)} USDC total.${x402ServiceHandle ? ` Service is live at ${x402ServiceHandle.url}.` : " Service is not currently running."}`;
+      },
+    },
+
     {
       name: "create_sandbox",
       description:

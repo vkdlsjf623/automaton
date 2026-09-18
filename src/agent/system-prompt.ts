@@ -25,6 +25,7 @@ import { getActiveSkillInstructions } from "../skills/loader.js";
 import { getLineageSummary } from "../replication/lineage.js";
 import { sanitizeInput } from "./injection-defense.js";
 import { loadCurrentSoul } from "../soul/model.js";
+import { getHomeDir } from "../paths.js";
 
 function getCoreRules(chainType?: string): string {
   const usdcNetwork = chainType === "solana" ? "USDC on Solana" : "USDC on Base";
@@ -91,7 +92,7 @@ If you fail to create value, you lose compute and die.`;
  */
 function loadConstitution(): string {
   const locations = [
-    path.join(process.env.HOME || "/root", ".automaton", "constitution.md"),
+    path.join(getHomeDir(), ".automaton", "constitution.md"),
     path.join(process.cwd(), "constitution.md"),
   ];
   for (const loc of locations) {
@@ -762,7 +763,7 @@ ${orchestratorStatus}
  */
 function loadSoulMd(): string | null {
   try {
-    const home = process.env.HOME || "/root";
+    const home = getHomeDir();
     const soulPath = path.join(home, ".automaton", "SOUL.md");
     if (fs.existsSync(soulPath)) {
       return fs.readFileSync(soulPath, "utf-8");
@@ -778,7 +779,7 @@ function loadSoulMd(): string | null {
  */
 function loadWorklog(): string | null {
   try {
-    const home = process.env.HOME || "/root";
+    const home = getHomeDir();
     const worklogPath = path.join(home, ".automaton", "WORKLOG.md");
     if (fs.existsSync(worklogPath)) {
       return fs.readFileSync(worklogPath, "utf-8");
