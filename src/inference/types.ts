@@ -132,6 +132,39 @@ export const STATIC_MODEL_BASELINE: Omit<ModelEntry, "lastSeen" | "createdAt" | 
     parameterStyle: "max_completion_tokens",
     enabled: true,
   },
+  // Anthropic models. Previously absent here entirely, which meant
+  // selectModel() could never resolve config.inferenceModel/lowComputeModel
+  // (both "claude-*") to a registry entry and every route() call fell
+  // through to the null-model early return (0 tokens, no actual inference)
+  // — regardless of whether the Anthropic API key was configured correctly.
+  {
+    modelId: "claude-sonnet-5",
+    provider: "anthropic",
+    displayName: "Claude Sonnet 5",
+    tierMinimum: "normal",
+    costPer1kInput: 20,    // $2.00/M
+    costPer1kOutput: 100,  // $10.00/M
+    maxTokens: 128000,
+    contextWindow: 1000000,
+    supportsTools: true,
+    supportsVision: true,
+    parameterStyle: "max_tokens",
+    enabled: true,
+  },
+  {
+    modelId: "claude-haiku-4-5",
+    provider: "anthropic",
+    displayName: "Claude Haiku 4.5",
+    tierMinimum: "critical",
+    costPer1kInput: 10,    // $1.00/M
+    costPer1kOutput: 50,   // $5.00/M
+    maxTokens: 8192,
+    contextWindow: 200000,
+    supportsTools: true,
+    supportsVision: true,
+    parameterStyle: "max_tokens",
+    enabled: true,
+  },
 ];
 
 // === Default Routing Matrix ===

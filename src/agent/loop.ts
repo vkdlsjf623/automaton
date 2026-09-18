@@ -23,6 +23,7 @@ import type {
   SpendTrackerInterface,
   InputSource,
   ModelStrategyConfig,
+  SurvivalTier,
 } from "../types.js";
 import { DEFAULT_MODEL_STRATEGY_CONFIG } from "../types.js";
 import type { PolicyEngine } from "./policy-engine.js";
@@ -431,9 +432,19 @@ export async function runAgentLoop(
       // Check survival tier
       // api_unreachable: creditsCents === -1 means API failed with no cache.
       // Do NOT kill the agent; continue in low-compute mode and retry next tick.
+      //
+      // -1 is also SURVIVAL_THRESHOLDS.dead's own definition of "genuinely
+      // negative balance = dead", so re-deriving tier from creditsCents
+      // further down (as `survivalTierForTurn` does below) would silently
+      // reclassify "API unreachable" as "dead" — and selectModel() refuses
+      // every non-free model at "dead", so inference never actually runs.
+      // Track the *intended* tier for this turn explicitly instead of
+      // re-deriving it from the sentinel value.
+      let survivalTierForTurn: SurvivalTier;
       if (financial.creditsCents === -1) {
         log(config, "[API_UNREACHABLE] Balance API unreachable, continuing in low-compute mode.");
         inference.setLowComputeMode(true);
+        survivalTierForTurn = "low_compute";
       } else {
         const tier = getSurvivalTier(financial.creditsCents);
 
@@ -471,6 +482,7 @@ export async function runAgentLoop(
 
         // Re-evaluate tier after potential topup
         const effectiveTier = getSurvivalTier(financial.creditsCents);
+        survivalTierForTurn = effectiveTier;
 
         if (effectiveTier === "critical") {
           log(config, "[CRITICAL] Credits critically low. Limited operation.");
@@ -596,7 +608,7 @@ export async function runAgentLoop(
       pendingInput = undefined;
 
       // ── Inference Call (via router when available) ──
-      const survivalTier = getSurvivalTier(financial.creditsCents);
+      const survivalTier = survivalTierForTurn;
       log(config, `[THINK] Routing inference (tier: ${survivalTier}, model: ${inference.getDefaultModel()})...`);
 
       const inferenceTools = toolsToInferenceFormat(tools);

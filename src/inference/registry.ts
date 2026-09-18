@@ -80,6 +80,32 @@ export class ModelRegistry {
   }
 
   /**
+   * Disable every baseline model whose provider has no configured API key.
+   *
+   * selectModel()'s routing-matrix step only checks `entry.enabled` —
+   * it has no visibility into which provider keys are actually configured.
+   * The static baseline is OpenAI-only and defaults every entry to
+   * enabled: true, so without this, an automaton with only an Anthropic
+   * (or Ollama) key still has every routing-matrix tier/task cell resolve
+   * to an OpenAI model it can't call, falls through resolveInferenceBackend's
+   * heuristics, and silently lands on the Conway backend instead — never
+   * reaching the user-configured model at all. Call once at startup, after
+   * initialize(), with which provider keys are actually present.
+   */
+  disableProvidersWithoutKeys(available: {
+    openai: boolean;
+    anthropic: boolean;
+  }): void {
+    for (const entry of this.getAll()) {
+      if (entry.provider === "openai" && !available.openai && entry.enabled) {
+        this.setEnabled(entry.modelId, false);
+      } else if (entry.provider === "anthropic" && !available.anthropic && entry.enabled) {
+        this.setEnabled(entry.modelId, false);
+      }
+    }
+  }
+
+  /**
    * Get a single model by ID.
    */
   get(modelId: string): ModelEntry | undefined {

@@ -284,6 +284,10 @@ async function run(): Promise<void> {
   // "gpt-oss:120b" route to Ollama based on their registered provider, not heuristics.
   const modelRegistry = new ModelRegistry(db.raw);
   modelRegistry.initialize();
+  modelRegistry.disableProvidersWithoutKeys({
+    openai: !!config.openaiApiKey,
+    anthropic: !!config.anthropicApiKey,
+  });
   const inference = createInferenceClient({
     apiUrl: config.conwayApiUrl,
     apiKey,
